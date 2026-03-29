@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import AsyncIterable, AsyncIterator
 from typing import Any
 
@@ -22,7 +20,7 @@ class Client:
         else:
             self._backend = OpenAIBackend(options)
 
-    async def __aenter__(self) -> Client:
+    async def __aenter__(self) -> "Client":
         await self._backend.connect()
         return self
 

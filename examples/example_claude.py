@@ -4,8 +4,6 @@ Named ``example_claude.py`` for consistency with other examples and to avoid
 name clashes on ``sys.path`` when run from this folder.
 """
 
-from __future__ import annotations
-
 import asyncio
 
 from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, TextBlock

@@ -20,15 +20,13 @@ OpenAI via an in-memory ``SQLiteSession`` per ``session_id``).
 Type a blank line or ``/quit`` to exit.
 """
 
-from __future__ import annotations
-
 import argparse
 import asyncio
 import os
 import sys
 from typing import Literal
 
-from agnos import AgentOptions, AgentText, AgentThinking, AgentTurnComplete, Client, resolve_backend
+from agnos import AgentOptions, AgentQueryCompleted, AgentText, AgentThinking, Client, resolve_backend
 
 
 def _parse_provider() -> Literal["openai", "claude"] | None:
@@ -77,7 +75,7 @@ async def run_turn(client: Client, user_text: str) -> None:
                 print("[assistant text]")
                 assistant_header = True
             print(event.text, end="", flush=True)
-        elif isinstance(event, AgentTurnComplete):
+        elif isinstance(event, AgentQueryCompleted):
             print("\n")
             print("[turn complete]")
             if event.is_error:

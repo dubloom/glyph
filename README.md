@@ -1,61 +1,92 @@
 ## agnos
 
-Minimal vendor-agnostic async SDK that normalizes Claude and OpenAI Agents into one event stream API.
+Minimal vendor-agnostic async SDK that normalizes Claude and OpenAI Agents into one event stream.
 
-### Install
+## Install
 
 ```bash
 pip install -e .
 ```
 
-### Core API
+## Quickstart (`query` helper)
 
 ```python
-from agnos import AgentOptions, Client, AgentText, AgentThinking, AgentTurnComplete
+import asyncio
 
-options = AgentOptions(
-    model="gpt-4.1",  # or "claude-sonnet-4-5"
-    instructions="You are a helpful assistant.",
-    provider="auto",  # "openai", "claude", or "auto"
-)
+from agnos import AgentOptions, AgentQueryCompleted, AgentText, query
 
-async with Client(options) as client:
-    await client.query("Give me one sentence about Rome.")
-    async for event in client.receive_response():
-        if isinstance(event, AgentThinking):
-            print("[thinking]", event.text)
-        elif isinstance(event, AgentText):
+
+async def main() -> None:
+    options = AgentOptions(
+        model="gpt-4.1-mini",  # or "claude-sonnet-4-20250514"
+        instructions="You are a helpful assistant.",
+        provider="auto",  # "openai", "claude", or "auto"
+    )
+
+    async for event in query(prompt="Tell me one fact about Rome.", options=options):
+        if isinstance(event, AgentText):
             print(event.text, end="")
-        elif isinstance(event, AgentTurnComplete):
-            print("\nDone:", event.is_error, event.stop_reason, event.usage, event.extra)
+        elif isinstance(event, AgentQueryCompleted):
+            print("\n\nDone:", event.is_error, event.usage, event.extra)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
-### Event Model
+## Streaming with `Client`
+
+Use this if you want explicit control of the turn lifecycle.
+
+```python
+import asyncio
+
+from agnos import AgentOptions, AgentQueryCompleted, AgentText, AgentThinking, Client
+
+
+async def main() -> None:
+    options = AgentOptions(model="gpt-4.1")
+
+    async with Client(options) as client:
+        await client.query("Give me one sentence about Rome.")
+        async for event in client.receive_response():
+            if isinstance(event, AgentThinking):
+                print("[thinking]", event.text)
+            elif isinstance(event, AgentText):
+                print(event.text, end="")
+            elif isinstance(event, AgentQueryCompleted):
+                print("\n[done]", event.is_error, event.stop_reason, event.usage, event.extra)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Event Types
 
 - `AgentText`: visible assistant text chunks
 - `AgentThinking`: reasoning/thinking chunks when available
-- `AgentTurnComplete`: end-of-turn metadata (`is_error`, `usage`, `extra`, etc.)
+- `AgentQueryCompleted`: end-of-turn metadata (`is_error`, `usage`, `extra`, etc.)
 
-### Backend Resolution
+## Backend Selection
 
 `provider="auto"` chooses backend from `model`:
 
-- Claude if the model contains `claude` or `anthropic`
-- OpenAI if it starts with `gpt-`, `o1`, `o3`, `o4`, or `chatgpt`
+- Claude if model contains `claude` or `anthropic`
+- OpenAI if model starts with `gpt-`, `o1`, `o3`, `o4`, or `chatgpt`
 
-If inference is ambiguous/unknown, set `provider` explicitly.
+If model inference is unknown or ambiguous, set `provider` explicitly.
 
-### Runtime Behavior
+## Notes
 
-- Use the client as an async context manager (`async with Client(...)`).
-- Turn order is strict: `query(...)` then `receive_response()`.
-- Calling `query(...)` twice without consuming `receive_response()` raises an error.
-- Backend exceptions are normalized into `AgentTurnComplete(is_error=True, ...)`.
+- Use `Client` as an async context manager (`async with Client(...)`).
+- Turn order for `Client` is `query(...)` then `receive_response()`.
+- Backend errors are emitted as `AgentQueryCompleted(is_error=True, ...)`.
 
-### Example
-
-Run:
+## Examples
 
 ```bash
-python examples/example_agnos.py
+python examples/agnos/simple_query.py
+python examples/agnos/stream.py
+python examples/agnos/query_and_receive.py
 ```

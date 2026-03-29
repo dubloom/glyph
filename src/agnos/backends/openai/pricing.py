@@ -1,11 +1,11 @@
 """OpenAI usage-cost estimation."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any
 
 _TOKENS_PER_MILLION = 1_000_000
+_REGIONAL_UPLIFT_MODELS = ("gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro")
+_REGIONAL_UPLIFT_MULTIPLIER = 1.10
 
 
 @dataclass(frozen=True)
@@ -20,11 +20,46 @@ class OpenAIModelPricing:
 # Standard OpenAI pricing (USD / 1M tokens).
 # Keep keys as model-family prefixes; longest prefix wins.
 _OPENAI_PRICING_BY_PREFIX: dict[str, OpenAIModelPricing] = {
+    "gpt-5.4-pro": OpenAIModelPricing(30.00, 180.00, None),
+    "gpt-5.4-mini": OpenAIModelPricing(0.75, 4.50, 0.075),
+    "gpt-5.4-nano": OpenAIModelPricing(0.20, 1.25, 0.02),
+    "gpt-5.4": OpenAIModelPricing(2.50, 15.00, 0.25),
+    "gpt-5.2-pro": OpenAIModelPricing(21.00, 168.00, None),
+    "gpt-5.2": OpenAIModelPricing(1.75, 14.00, 0.175),
+    "gpt-5-pro": OpenAIModelPricing(15.00, 120.00, None),
+    "gpt-5-mini": OpenAIModelPricing(0.25, 2.00, 0.025),
+    "gpt-5-nano": OpenAIModelPricing(0.05, 0.40, 0.005),
+    "gpt-5.1": OpenAIModelPricing(1.25, 10.00, 0.125),
+    "gpt-5": OpenAIModelPricing(1.25, 10.00, 0.125),
     "gpt-4.1-nano": OpenAIModelPricing(0.10, 0.40, 0.025),
     "gpt-4.1-mini": OpenAIModelPricing(0.40, 1.60, 0.10),
     "gpt-4.1": OpenAIModelPricing(2.00, 8.00, 0.50),
+    "gpt-4o-mini": OpenAIModelPricing(0.15, 0.60, 0.075),
+    "gpt-4o-2024-05-13": OpenAIModelPricing(5.00, 15.00, None),
+    "gpt-4o": OpenAIModelPricing(2.50, 10.00, 1.25),
+    "gpt-4-turbo-2024-04-09": OpenAIModelPricing(10.00, 30.00, None),
+    "gpt-4-0125-preview": OpenAIModelPricing(10.00, 30.00, None),
+    "gpt-4-1106-preview": OpenAIModelPricing(10.00, 30.00, None),
+    "gpt-4-1106-vision-preview": OpenAIModelPricing(10.00, 30.00, None),
+    "gpt-4-0613": OpenAIModelPricing(30.00, 60.00, None),
+    "gpt-4-0314": OpenAIModelPricing(30.00, 60.00, None),
+    "gpt-4-32k": OpenAIModelPricing(60.00, 120.00, None),
     "o4-mini": OpenAIModelPricing(1.10, 4.40, 0.275),
+    "o3-mini": OpenAIModelPricing(1.10, 4.40, 0.55),
+    "o3-pro": OpenAIModelPricing(20.00, 80.00, None),
     "o3": OpenAIModelPricing(2.00, 8.00, 0.50),
+    "o1-mini": OpenAIModelPricing(1.10, 4.40, 0.55),
+    "o1-pro": OpenAIModelPricing(150.00, 600.00, None),
+    "o1": OpenAIModelPricing(15.00, 60.00, 7.50),
+    "gpt-3.5-turbo-16k-0613": OpenAIModelPricing(3.00, 4.00, None),
+    "gpt-3.5-turbo-instruct": OpenAIModelPricing(1.50, 2.00, None),
+    "gpt-3.5-turbo-0125": OpenAIModelPricing(0.50, 1.50, None),
+    "gpt-3.5-turbo-1106": OpenAIModelPricing(1.00, 2.00, None),
+    "gpt-3.5-turbo-0613": OpenAIModelPricing(1.50, 2.00, None),
+    "gpt-3.5-turbo": OpenAIModelPricing(0.50, 1.50, None),
+    "gpt-3.5-0301": OpenAIModelPricing(1.50, 2.00, None),
+    "davinci-002": OpenAIModelPricing(2.00, 2.00, None),
+    "babbage-002": OpenAIModelPricing(0.40, 0.40, None),
 }
 
 
@@ -62,6 +97,7 @@ def estimate_openai_total_cost_usd(
     *,
     model: str,
     usage: dict[str, Any] | None,
+    regional_processing: bool = False,
 ) -> float | None:
     """Estimate total request cost (USD) from OpenAI token usage.
 
@@ -86,4 +122,8 @@ def estimate_openai_total_cost_usd(
     else:
         cached_input_cost_usd = (cached_tokens / _TOKENS_PER_MILLION) * pricing.input_usd_per_million
 
-    return input_cost_usd + cached_input_cost_usd + output_cost_usd
+    total = input_cost_usd + cached_input_cost_usd + output_cost_usd
+    normalized_model = model.strip().lower()
+    if regional_processing and any(normalized_model.startswith(m) for m in _REGIONAL_UPLIFT_MODELS):
+        total *= _REGIONAL_UPLIFT_MULTIPLIER
+    return total

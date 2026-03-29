@@ -4,8 +4,6 @@ Named ``example_openai.py`` (not ``openai.py``) so running from this directory
 does not shadow the ``openai`` package on ``sys.path``.
 """
 
-from __future__ import annotations
-
 from agents import Agent, Runner, set_tracing_disabled
 
 # Optional: silence trace ingestion logs.

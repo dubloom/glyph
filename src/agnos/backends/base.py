@@ -1,7 +1,5 @@
 """Internal backend contract."""
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterable, AsyncIterator
 from typing import Any, Protocol
 

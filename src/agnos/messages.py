@@ -1,7 +1,5 @@
 """Vendor-neutral stream events (not Claude-shaped assistant messages)."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Any, TypeAlias
 

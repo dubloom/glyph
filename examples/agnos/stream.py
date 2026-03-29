@@ -1,4 +1,3 @@
-from __future__ import annotations
 import asyncio
 
 from agnos import AgentOptions, AgentText, AgentThinking, AgentQueryCompleted, Client, resolve_backend

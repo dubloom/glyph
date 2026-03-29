@@ -20,7 +20,6 @@ OpenAI via an in-memory ``SQLiteSession`` per ``session_id``).
 Type a blank line or ``/quit`` to exit.
 """
 
-from __future__ import annotations
 import asyncio
 
 from agnos import AgentOptions, AgentText, AgentThinking, AgentQueryCompleted, Client, resolve_backend
