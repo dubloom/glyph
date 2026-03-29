@@ -1,4 +1,4 @@
-"""Pricing helpers for usage-cost estimation."""
+"""OpenAI usage-cost estimation."""
 
 from __future__ import annotations
 

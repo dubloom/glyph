@@ -10,7 +10,8 @@ from agents.usage import serialize_usage
 
 from agnos.messages import AgentText, AgentThinking, AgentQueryCompleted, AgentEvent
 from agnos.options import AgentOptions
-from agnos.pricing import estimate_openai_total_cost_usd
+
+from .pricing import estimate_openai_total_cost_usd
 
 
 def _reasoning_text(item: ReasoningItem) -> str:

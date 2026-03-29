@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterable, AsyncIterator
 from typing import Any
 
-from agnos.agents.base import AgentBackend
-from agnos.backends.claude_backend import ClaudeBackend
-from agnos.backends.openai_backend import OpenAIBackend
+from agnos.backends.base import AgentBackend
+from agnos.backends.claude import ClaudeBackend
+from agnos.backends.openai import OpenAIBackend
 from agnos.messages import AgentEvent
 from agnos.options import AgentOptions, resolve_backend
 
