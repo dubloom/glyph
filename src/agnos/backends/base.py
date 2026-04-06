@@ -25,7 +25,7 @@ class AgentBackend(Protocol):
         """Send a user turn."""
         ...
 
-    async def query_and_receive(
+    async def query_and_receive_response(
         self,
         prompt: str | AsyncIterable[dict[str, Any]],
         session_id: str = "default",
@@ -39,6 +39,10 @@ class AgentBackend(Protocol):
         session_id: str = "default",
     ) -> AsyncIterator[AgentEvent]:
         """Convenience API: send a turn and stream normalized events."""
+        ...
+
+    async def receive_messages(self) -> AsyncIterator[AgentEvent]:
+        """Stream normalized agent events until the user exits manually the stream."""
         ...
 
     async def receive_response(self) -> AsyncIterator[AgentEvent]:

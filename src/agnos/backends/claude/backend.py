@@ -1,6 +1,7 @@
+import asyncio
 from collections.abc import AsyncIterable
 from collections.abc import AsyncIterator
-import asyncio
+from collections.abc import Iterator
 import json
 from pathlib import Path
 import sys
@@ -104,6 +105,52 @@ def _make_pre_tool_use_hooks(options: AgentOptions) -> dict[str, list[ClaudeHook
         ]
     }
 
+def _iter_events_for_claude_content_block(block: object) -> Iterator[AgentEvent]:
+    """Map one assistant content block to zero or more ``AgentEvent`` (shared by list + stream)."""
+    if isinstance(block, ClaudeTextBlock):
+        yield AgentText(text=block.text)
+    elif isinstance(block, ClaudeThinkingBlock):
+        yield AgentThinking(text=block.thinking, signature=block.signature)
+    elif isinstance(block, ClaudeToolUseBlock):
+        yield AgentToolCall(
+            name=block.name,
+            call_id=block.id,
+            arguments=block.input,
+            tool_type="tool_use",
+        )
+    elif isinstance(block, ClaudeToolResultBlock):
+        yield AgentToolResult(
+            call_id=block.tool_use_id,
+            output=block.content,
+            is_error=block.is_error,
+            tool_type="tool_result",
+        )
+
+
+def _claude_result_completion(msg: ClaudeResultMessage) -> AgentQueryCompleted:
+    extra: dict[str, Any] = {}
+    if msg.duration_ms is not None:
+        extra["duration_ms"] = msg.duration_ms
+    if msg.total_cost_usd is not None:
+        extra["total_cost_usd"] = msg.total_cost_usd
+    return AgentQueryCompleted(
+        is_error=msg.is_error,
+        stop_reason=msg.stop_reason,
+        message=msg.result,
+        usage=msg.usage,
+        extra=extra,
+    )
+
+
+def _claude_receive_error_completed(exc: Exception) -> AgentQueryCompleted:
+    return AgentQueryCompleted(
+        is_error=True,
+        stop_reason=None,
+        message=str(exc),
+        usage=None,
+        extra={"exception_type": exc.__class__.__name__},
+    )
+
 
 class ClaudeBackend:
     """Delegates to ``ClaudeSDKClient`` and maps assistant output to shared event types."""
@@ -158,7 +205,7 @@ class ClaudeBackend:
             raise RuntimeError("Backend is not connected; use `async with Client(...)` first.")
         await self._client.query(prompt, session_id=session_id)
 
-    async def query_and_receive(
+    async def query_and_receive_response(
         self,
         prompt: str | AsyncIterable[dict[str, Any]],
         session_id: str = "default",
@@ -172,53 +219,11 @@ class ClaudeBackend:
             async for msg in self._client.receive_response():
                 if isinstance(msg, ClaudeAssistantMessage):
                     for block in msg.content:
-                        if isinstance(block, ClaudeTextBlock):
-                            events.append(AgentText(text=block.text))
-                        elif isinstance(block, ClaudeThinkingBlock):
-                            events.append(AgentThinking(text=block.thinking, signature=block.signature))
-                        elif isinstance(block, ClaudeToolUseBlock):
-                            events.append(
-                                AgentToolCall(
-                                    name=block.name,
-                                    call_id=block.id,
-                                    arguments=block.input,
-                                    tool_type="tool_use",
-                                )
-                            )
-                        elif isinstance(block, ClaudeToolResultBlock):
-                            events.append(
-                                AgentToolResult(
-                                    call_id=block.tool_use_id,
-                                    output=block.content,
-                                    is_error=block.is_error,
-                                    tool_type="tool_result",
-                                )
-                            )
+                        events.extend(_iter_events_for_claude_content_block(block))
                 elif isinstance(msg, ClaudeResultMessage):
-                    extra: dict[str, Any] = {}
-                    if msg.duration_ms is not None:
-                        extra["duration_ms"] = msg.duration_ms
-                    if msg.total_cost_usd is not None:
-                        extra["total_cost_usd"] = msg.total_cost_usd
-                    events.append(
-                        AgentQueryCompleted(
-                            is_error=msg.is_error,
-                            stop_reason=msg.stop_reason,
-                            message=msg.result,
-                            usage=msg.usage,
-                            extra=extra,
-                        )
-                    )
+                    events.append(_claude_result_completion(msg))
         except Exception as exc:
-            events.append(
-                AgentQueryCompleted(
-                    is_error=True,
-                    stop_reason=None,
-                    message=str(exc),
-                    usage=None,
-                    extra={"exception_type": exc.__class__.__name__},
-                )
-            )
+            events.append(_claude_receive_error_completed(exc))
         return events
 
     async def query_streamed(
@@ -230,49 +235,22 @@ class ClaudeBackend:
         async for event in self.receive_response():
             yield event
 
-    async def receive_response(self) -> AsyncIterator[AgentEvent]:
+    async def receive_messages(self) -> AsyncIterator[AgentEvent]:
         if not self._connected:
             raise RuntimeError("Backend is not connected; use `async with Client(...)` first.")
         try:
-            async for msg in self._client.receive_response():
+            async for msg in self._client.receive_messages():
                 if isinstance(msg, ClaudeAssistantMessage):
                     for block in msg.content:
-                        if isinstance(block, ClaudeTextBlock):
-                            yield AgentText(text=block.text)
-                        elif isinstance(block, ClaudeThinkingBlock):
-                            yield AgentThinking(text=block.thinking, signature=block.signature)
-                        elif isinstance(block, ClaudeToolUseBlock):
-                            yield AgentToolCall(
-                                name=block.name,
-                                call_id=block.id,
-                                arguments=block.input,
-                                tool_type="tool_use",
-                            )
-                        elif isinstance(block, ClaudeToolResultBlock):
-                            yield AgentToolResult(
-                                call_id=block.tool_use_id,
-                                output=block.content,
-                                is_error=block.is_error,
-                                tool_type="tool_result",
-                            )
+                        for ev in _iter_events_for_claude_content_block(block):
+                            yield ev
                 elif isinstance(msg, ClaudeResultMessage):
-                    extra: dict[str, Any] = {}
-                    if msg.duration_ms is not None:
-                        extra["duration_ms"] = msg.duration_ms
-                    if msg.total_cost_usd is not None:
-                        extra["total_cost_usd"] = msg.total_cost_usd
-                    yield AgentQueryCompleted(
-                        is_error=msg.is_error,
-                        stop_reason=msg.stop_reason,
-                        message=msg.result,
-                        usage=msg.usage,
-                        extra=extra,
-                    )
+                    yield _claude_result_completion(msg)
         except Exception as exc:
-            yield AgentQueryCompleted(
-                is_error=True,
-                stop_reason=None,
-                message=str(exc),
-                usage=None,
-                extra={"exception_type": exc.__class__.__name__},
-            )
+            yield _claude_receive_error_completed(exc)
+
+    async def receive_response(self) -> AsyncIterator[AgentEvent]:
+        async for message in self.receive_messages():
+            yield message
+            if isinstance(message, AgentQueryCompleted):
+                return

@@ -1,6 +1,6 @@
 """Vendor-agnostic agent SDK facade."""
 
-from agnos.client import Client
+from agnos.client import AgnosClient
 from agnos.messages import AgentEvent
 from agnos.messages import AgentQueryCompleted
 from agnos.messages import AgentText
@@ -21,7 +21,7 @@ __all__ = [
     "AgentToolCall",
     "AgentToolResult",
     "AgentQueryCompleted",
-    "Client",
+    "AgnosClient",
     "PermissionPolicy",
     "query",
     "resolve_backend",

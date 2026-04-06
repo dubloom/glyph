@@ -9,7 +9,6 @@ from typing import TypeAlias
 @dataclass
 class AgentText:
     """Visible assistant text segment."""
-
     text: str
 
 

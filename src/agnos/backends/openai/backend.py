@@ -1,5 +1,7 @@
+from collections import deque
 from collections.abc import AsyncIterable
 from collections.abc import AsyncIterator
+from collections.abc import Iterator
 from typing import Any
 from typing import ClassVar
 
@@ -9,9 +11,11 @@ from agents import SQLiteSession
 from agents import set_tracing_disabled
 from agents.items import MessageOutputItem
 from agents.items import ReasoningItem
+from agents.items import RunItem
 from agents.items import ToolCallItem
 from agents.items import ToolCallOutputItem
 from agents.result import RunResultStreaming
+from agents.run import DEFAULT_MAX_TURNS
 from agents.usage import serialize_usage
 
 from agnos.messages import AgentEvent
@@ -117,6 +121,37 @@ def _openai_cost_extra(model: str, usage: dict[str, Any] | None) -> dict[str, An
     return {"total_cost_usd": total}
 
 
+def _openai_success_completion(model: str, context_wrapper: Any, final_output: Any) -> AgentQueryCompleted:
+    """``AgentQueryCompleted`` for a finished OpenAI Agents run (``Runner.run`` or streamed run)."""
+    try:
+        usage_dict = serialize_usage(context_wrapper.usage)
+    except Exception:
+        usage_dict = None
+    final_message: str | None = final_output if isinstance(final_output, str) else None
+    return AgentQueryCompleted(
+        is_error=False,
+        stop_reason=None,
+        message=final_message,
+        usage=usage_dict,
+        extra=_openai_cost_extra(model, usage_dict),
+    )
+
+
+def _iter_events_for_run_item(item: RunItem) -> Iterator[AgentEvent]:
+    """Map one OpenAI Agents ``RunItem`` to zero or more ``AgentEvent`` (shared by run + stream)."""
+    if isinstance(item, ReasoningItem):
+        text = _reasoning_text(item)
+        if text:
+            yield AgentThinking(text=text, signature=None)
+    elif isinstance(item, MessageOutputItem):
+        for segment in _get_message_item_content(item):
+            yield AgentText(text=segment)
+    elif isinstance(item, ToolCallItem):
+        yield _tool_call_started(item)
+    elif isinstance(item, ToolCallOutputItem):
+        yield _tool_call_completed(item)
+
+
 class OpenAIBackend:
     """Turns via ``Runner.run_streamed`` + ``SQLiteSession``; maps output to ``AgentEvent``."""
 
@@ -124,7 +159,7 @@ class OpenAIBackend:
 
     def __init__(self, options: AgentOptions) -> None:
         self._model = options.model
-        self._max_turns = options.max_turns
+        self._max_turns = options.max_turns or DEFAULT_MAX_TURNS
         allowed_tools, disallowed_tools = options.effective_tool_lists()
         confirm_patches, confirm_bash = options.openai_confirmations()
         tools = make_openai_builtin_tools(
@@ -145,7 +180,7 @@ class OpenAIBackend:
             agent_kw["tools"] = tools
         self._agent = Agent(**agent_kw)
         self._connected = False
-        self._pending_run: RunResultStreaming | None = None
+        self._pending_runs: deque[RunResultStreaming] = deque()
         self._sessions: dict[str, SQLiteSession] = {}
 
     async def connect(self) -> None:
@@ -169,34 +204,38 @@ class OpenAIBackend:
     ) -> None:
         if not self._connected:
             raise RuntimeError("Backend is not connected; use `async with Client(...)` first.")
-        if self._pending_run is not None:
-            raise RuntimeError("A turn is already queued. Call receive_response() before query() again.")
         if not isinstance(prompt, str):
             raise TypeError("OpenAI backend only supports string prompts in this version.")
-        session = self._session_for(session_id)
-        run_kw: dict[str, Any] = {"input": prompt, "session": session}
-        if self._max_turns is not None:
-            run_kw["max_turns"] = self._max_turns
-        self._pending_run = Runner.run_streamed(self._agent, **run_kw)
 
-    async def query_and_receive(
+        session = self._session_for(session_id)
+
+        self._pending_runs.append(
+            Runner.run_streamed(
+                self._agent,
+                input=prompt,
+                session=session,
+                max_turns=self._max_turns
+            )
+        )
+
+    async def query_and_receive_response(
         self,
         prompt: str | AsyncIterable[dict[str, Any]],
         session_id: str = "default",
     ) -> list[AgentEvent]:
         if not self._connected:
             raise RuntimeError("Backend is not connected; use `async with Client(...)` first.")
-        if self._pending_run is not None:
-            raise RuntimeError("A turn is already queued. Call receive_response() before query_and_receive().")
         if not isinstance(prompt, str):
             raise TypeError("OpenAI backend only supports string prompts in this version.")
 
         session = self._session_for(session_id)
         try:
-            run_kw: dict[str, Any] = {"input": prompt, "session": session}
-            if self._max_turns is not None:
-                run_kw["max_turns"] = self._max_turns
-            result = await Runner.run(self._agent, **run_kw)
+            result = await Runner.run(
+                self._agent,
+                input=prompt,
+                session=session,
+                max_turns=self._max_turns
+            )
         except Exception as exc:
             return [
                 AgentQueryCompleted(
@@ -210,29 +249,9 @@ class OpenAIBackend:
 
         events: list[AgentEvent] = []
         for item in result.new_items:
-            if isinstance(item, ReasoningItem):
-                text = _reasoning_text(item)
-                if text:
-                    events.append(AgentThinking(text=text, signature=None))
-            elif isinstance(item, MessageOutputItem):
-                for segment in _get_message_item_content(item):
-                    events.append(AgentText(text=segment))
-            elif isinstance(item, ToolCallItem):
-                events.append(_tool_call_started(item))
-            elif isinstance(item, ToolCallOutputItem):
-                events.append(_tool_call_completed(item))
+            events.extend(_iter_events_for_run_item(item))
 
-        usage_dict = serialize_usage(result.context_wrapper.usage)
-        final_message: str | None = result.final_output if isinstance(result.final_output, str) else None
-        events.append(
-            AgentQueryCompleted(
-                is_error=False,
-                stop_reason=None,
-                message=final_message,
-                usage=usage_dict,
-                extra=_openai_cost_extra(self._model, usage_dict),
-            )
-        )
+        events.append(_openai_success_completion(self._model, result.context_wrapper, result.final_output))
         return events
 
     async def query_streamed(
@@ -244,78 +263,41 @@ class OpenAIBackend:
         async for event in self.receive_response():
             yield event
 
-    async def receive_response(self) -> AsyncIterator[AgentEvent]:
+    async def receive_messages(self) -> AsyncIterator[AgentEvent]:
         if not self._connected:
             raise RuntimeError("Backend is not connected; use `async with Client(...)` first.")
-        if self._pending_run is None:
+        if not self._pending_runs:
             raise RuntimeError("No prompt queued; call query() first.")
 
-        run = self._pending_run
-        try:
-            seen_tool_starts: set[str] = set()
-            seen_tool_results: set[str] = set()
+        while self._pending_runs:
+            run = self._pending_runs.popleft()
             try:
-                async for event in run.stream_events():
-                    if event.type != "run_item_stream_event":
-                        continue
-                    item = event.item
-                    if isinstance(item, ReasoningItem):
-                        text = _reasoning_text(item)
-                        if text:
-                            yield AgentThinking(text=text, signature=None)
-                    elif isinstance(item, MessageOutputItem):
-                        for segment in _get_message_item_content(item):
-                            yield AgentText(text=segment)
-                    elif isinstance(item, ToolCallItem):
-                        ev = _tool_call_started(item)
-                        if ev.call_id is not None:
-                            seen_tool_starts.add(ev.call_id)
-                        yield ev
-                    elif isinstance(item, ToolCallOutputItem):
-                        ev = _tool_call_completed(item)
-                        if ev.call_id is not None:
-                            seen_tool_results.add(ev.call_id)
-                        yield ev
-            except Exception as exc:
-                yield AgentQueryCompleted(
-                    is_error=True,
-                    stop_reason=None,
-                    message=str(exc),
-                    usage=None,
-                    extra={"exception_type": exc.__class__.__name__},
-                )
+                try:
+                    async for event in run.stream_events():
+                        if event.type != "run_item_stream_event":
+                            continue
+                        for ev in _iter_events_for_run_item(event.item):
+                            yield ev
+                except Exception as exc:
+                    yield AgentQueryCompleted(
+                        is_error=True,
+                        stop_reason=None,
+                        message=str(exc),
+                        usage=None,
+                        extra={"exception_type": exc.__class__.__name__},
+                    )
+                    return
+
+                # We rely on stream_events() only. If tool calls/results ever go missing in practice
+                # (SDK drift, early stream exit, etc.), consider re-merging ToolCallItem /
+                # ToolCallOutputItem from run.new_items with call_id dedupe against the stream.
+                yield _openai_success_completion(self._model, run.context_wrapper, run.final_output)
+            finally:
+                if not run.is_complete:
+                    run.cancel()
+
+    async def receive_response(self) -> AsyncIterator[AgentEvent]:
+        async for message in self.receive_messages():
+            yield message
+            if isinstance(message, AgentQueryCompleted):
                 return
-
-            for item in run.new_items:
-                if isinstance(item, ToolCallItem):
-                    ev = _tool_call_started(item)
-                    if ev.call_id is not None and ev.call_id in seen_tool_starts:
-                        continue
-                    if ev.call_id is not None:
-                        seen_tool_starts.add(ev.call_id)
-                    yield ev
-                elif isinstance(item, ToolCallOutputItem):
-                    ev = _tool_call_completed(item)
-                    if ev.call_id is not None and ev.call_id in seen_tool_results:
-                        continue
-                    if ev.call_id is not None:
-                        seen_tool_results.add(ev.call_id)
-                    yield ev
-
-            try:
-                usage_dict = serialize_usage(run.context_wrapper.usage)
-            except Exception:
-                usage_dict = None
-
-            final_message: str | None = run.final_output if isinstance(run.final_output, str) else None
-            yield AgentQueryCompleted(
-                is_error=False,
-                stop_reason=None,
-                message=final_message,
-                usage=usage_dict,
-                extra=_openai_cost_extra(self._model, usage_dict),
-            )
-        finally:
-            if not run.is_complete:
-                run.cancel()
-            self._pending_run = None

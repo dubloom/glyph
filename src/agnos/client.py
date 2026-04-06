@@ -2,7 +2,6 @@ from collections.abc import AsyncIterable
 from collections.abc import AsyncIterator
 from typing import Any
 
-from agnos.backends.base import AgentBackend
 from agnos.backends.claude import ClaudeBackend
 from agnos.backends.openai import OpenAIBackend
 from agnos.messages import AgentEvent
@@ -10,7 +9,7 @@ from agnos.options import AgentOptions
 from agnos.options import resolve_backend
 
 
-class Client:
+class AgnosClient:
     """Vendor-agnostic client with Claude-style ``query`` / ``receive_response`` flow."""
 
     def __init__(self, options: AgentOptions | None = None) -> None:
@@ -18,11 +17,11 @@ class Client:
             raise TypeError("Client requires AgentOptions.")
         self.backend_name = resolve_backend(options)
         if self.backend_name == "claude":
-            self._backend: AgentBackend = ClaudeBackend(options)
+            self._backend = ClaudeBackend(options)
         else:
             self._backend = OpenAIBackend(options)
 
-    async def __aenter__(self) -> "Client":
+    async def __aenter__(self) -> "AgnosClient":
         await self._backend.connect()
         return self
 
@@ -42,12 +41,12 @@ class Client:
     ) -> None:
         await self._backend.query(prompt, session_id=session_id)
 
-    async def query_and_receive(
+    async def query_and_receive_response(
         self,
         prompt: str | AsyncIterable[dict[str, Any]],
         session_id: str = "default",
     ) -> list[AgentEvent]:
-        return await self._backend.query_and_receive(prompt, session_id=session_id)
+        return await self._backend.query_and_receive_response(prompt, session_id=session_id)
 
     async def query_streamed(
         self,
@@ -57,6 +56,12 @@ class Client:
         async for msg in self._backend.query_streamed(prompt, session_id=session_id):
             yield msg
 
+    async def receive_messages(self) -> AsyncIterator[AgentEvent]:
+        """ Must be exitted manually """
+        async for msg in self._backend.receive_messages():
+            yield msg
+
     async def receive_response(self) -> AsyncIterator[AgentEvent]:
+        """ Automatically exits when a ResultEvent is dispatched """
         async for msg in self._backend.receive_response():
             yield msg
