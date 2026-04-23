@@ -20,9 +20,10 @@ from .decorators import step
 
 _STEP_HEADING_RE = re.compile(r"^## Step:\s*(?P<step_id>.+?)\s*$", re.MULTILINE)
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
-_PROMPT_VARIABLE_RE = re.compile(r"{{\s*([A-Za-z_][A-Za-z0-9_]*)\s*}}")
+_PROMPT_VARIABLE_RE = re.compile(r"{{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*}}")
 _METADATA_LINE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\s*:")
 _SUPPORTED_STEP_METADATA_KEYS = {"execute", "model", "returns", "stop"}
+_MISSING = object()
 
 _SCALAR_TYPES: dict[str, type[Any]] = {
     "str": str,
@@ -556,12 +557,11 @@ def _build_step_method(
         return step(_execute_step)
 
     if step_definition.kind == "llm":
-        prompt_template = _compile_prompt_template(step_definition.prompt or "")
+        prompt_template = step_definition.prompt or ""
 
         async def _llm_step(self, previous_result: Any = None) -> None:
-            del previous_result
-            context = _markdown_context(self)
-            self.prompt = self.fill_prompt(**context)
+            context = _prompt_context(self, previous_result)
+            self.prompt = _render_prompt_template(prompt_template, context)
             return None
 
         _llm_step.__name__ = method_name
@@ -591,6 +591,44 @@ def _markdown_context(workflow: Any) -> dict[str, Any]:
         context = {}
         setattr(workflow, "_markdown_context", context)
     return context
+
+
+def _prompt_context(workflow: Any, previous_result: Any) -> dict[str, Any]:
+    context = dict(_markdown_context(workflow))
+    if previous_result is None:
+        return context
+
+    context.setdefault("input", previous_result)
+    if isinstance(previous_result, dict):
+        for key, value in previous_result.items():
+            context.setdefault(key, value)
+    return context
+
+
+def _render_prompt_template(prompt: str, context: dict[str, Any]) -> str:
+    def _replace(match: re.Match[str]) -> str:
+        expression = match.group(1)
+        value = _resolve_prompt_value(expression, context)
+        if value is _MISSING:
+            return match.group(0)
+        return str(value)
+
+    return _PROMPT_VARIABLE_RE.sub(_replace, prompt)
+
+
+def _resolve_prompt_value(expression: str, context: dict[str, Any]) -> Any:
+    current: Any = context
+    for part in expression.split("."):
+        if isinstance(current, dict):
+            if part not in current:
+                return _MISSING
+            current = current[part]
+            continue
+        if hasattr(current, part):
+            current = getattr(current, part)
+            continue
+        return _MISSING
+    return current
 
 
 def _load_execute_handler(target: str, base_directory: Path):

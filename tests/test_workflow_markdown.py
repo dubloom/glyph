@@ -2,6 +2,8 @@ from pathlib import Path
 
 import pytest
 
+import glyph.workflows as workflows_module
+from glyph import AgentQueryCompleted
 from glyph.workflows.markdown import _load_execute_handler
 from glyph.workflows.markdown import load_markdown_workflow
 from glyph.workflows.markdown import parse_markdown_workflow
@@ -170,3 +172,80 @@ returns:
 
     assert result["file_path"] == str(tmp_path / "postcard.txt")
     assert (tmp_path / "postcard.txt").read_text(encoding="utf-8") == "Lisbon"
+
+
+class _FakeMarkdownClient:
+    def __init__(self) -> None:
+        self.prompts: list[tuple[str, str]] = []
+
+    async def __aenter__(self) -> "_FakeMarkdownClient":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    async def query_and_receive_response(self, prompt: str, session_id: str = "default") -> list[object]:
+        self.prompts.append((prompt, session_id))
+        return [AgentQueryCompleted(message=prompt)]
+
+
+@pytest.mark.asyncio
+async def test_load_markdown_workflow_injects_initial_input_into_first_llm_step(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    workflow_path = tmp_path / "workflow.md"
+    workflow_path.write_text(
+        """---
+name: askCommand
+options:
+  model: gpt-4.1-mini
+---
+
+## Step: draftCommand
+Flat: {{ query }}
+Nested: {{ input.query }}
+Missing: {{ missing }}
+""",
+        encoding="utf-8",
+    )
+
+    fake_client = _FakeMarkdownClient()
+    monkeypatch.setattr(workflows_module, "GlyphClient", lambda options: fake_client)
+
+    workflow_cls = load_markdown_workflow(workflow_path)
+    result = await workflow_cls.run(initial_input={"query": "git status"}, session_id="markdown-test")
+
+    assert fake_client.prompts == [
+        ("Flat: git status\nNested: git status\nMissing: {{ missing }}", "markdown-test")
+    ]
+    assert isinstance(result, AgentQueryCompleted)
+    assert result.message == "Flat: git status\nNested: git status\nMissing: {{ missing }}"
+
+
+@pytest.mark.asyncio
+async def test_load_markdown_workflow_exposes_scalar_initial_input_as_input(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    workflow_path = tmp_path / "workflow.md"
+    workflow_path.write_text(
+        """---
+name: askCommand
+options:
+  model: gpt-4.1-mini
+---
+
+## Step: draftCommand
+Prompt: {{ input }}
+""",
+        encoding="utf-8",
+    )
+
+    fake_client = _FakeMarkdownClient()
+    monkeypatch.setattr(workflows_module, "GlyphClient", lambda options: fake_client)
+
+    workflow_cls = load_markdown_workflow(workflow_path)
+    result = await workflow_cls.run(initial_input="git status", session_id="markdown-scalar")
+
+    assert fake_client.prompts == [("Prompt: git status", "markdown-scalar")]
+    assert isinstance(result, AgentQueryCompleted)
+    assert result.message == "Prompt: git status"
