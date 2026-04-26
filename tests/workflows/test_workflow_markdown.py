@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-import glyph.workflows as workflows_module
 from glyph import AgentQueryCompleted
+import glyph.workflows as workflows_module
 from glyph.workflows.markdown import _load_execute_handler
 from glyph.workflows.markdown import load_markdown_workflow
 from glyph.workflows.markdown import parse_markdown_workflow

@@ -6,8 +6,8 @@ import sys
 
 import pytest
 
-import glyph.cli
 from glyph import AgentQueryCompleted
+import glyph.cli
 
 
 @pytest.mark.asyncio

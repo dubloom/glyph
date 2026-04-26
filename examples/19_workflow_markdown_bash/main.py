@@ -1,7 +1,8 @@
 import asyncio
 from pathlib import Path
 
-from glyph import AgentQueryCompleted, run_markdown_workflow
+from glyph import AgentQueryCompleted
+from glyph import run_markdown_workflow
 
 
 async def main() -> None:

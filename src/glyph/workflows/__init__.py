@@ -1,13 +1,12 @@
 """Simple sequential workflow helpers inspired by LlamaIndex workflows."""
 import inspect
-import uuid
 from os import PathLike
 from typing import Any
 from typing import Callable
 from typing import ClassVar
+import uuid
 
 from glyph.client import GlyphClient
-from glyph.messages import AgentEvent
 from glyph.messages import AgentQueryCompleted
 from glyph.options import AgentOptions
 

@@ -1,6 +1,6 @@
 """Workflow step decorator and descriptor types."""
-import logging
 from dataclasses import dataclass
+import logging
 from typing import Any
 from typing import Callable
 from typing import Literal

@@ -1,11 +1,11 @@
 import os
+
 import pytest
 
-from glyph import AgentOptions, GlyphClient
+from glyph import AgentOptions
 from glyph import AgentQueryCompleted
 from glyph import AgentText
-from glyph import query
-
+from glyph import GlyphClient
 
 
 @pytest.mark.asyncio

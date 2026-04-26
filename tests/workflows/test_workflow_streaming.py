@@ -1,12 +1,12 @@
 import pytest
 
-import glyph.workflows as workflows_module
-import glyph.workflows.decorators as decorators_module
 from glyph import AgentOptions
 from glyph import AgentQueryCompleted
 from glyph import AgentText
 from glyph import GlyphWorkflow
 from glyph import step
+import glyph.workflows as workflows_module
+import glyph.workflows.decorators as decorators_module
 
 
 class _FakeStreamingClient:

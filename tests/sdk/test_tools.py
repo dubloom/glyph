@@ -1,6 +1,6 @@
 import os
-import uuid
 from pathlib import Path
+import uuid
 
 import pytest
 
@@ -11,6 +11,7 @@ from glyph import AgentToolCall
 from glyph import ApprovalRequest
 from glyph import PermissionPolicy
 from glyph import query
+
 
 _READ_TOOL_NAMES = frozenset({"Read", "read_file"})
 _EDIT_TOOL_NAMES = frozenset({"Write", "Edit", "apply_patch_call"})

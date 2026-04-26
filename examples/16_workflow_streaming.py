@@ -3,7 +3,6 @@ import os
 
 from glyph import AgentOptions
 from glyph import AgentQueryCompleted
-from glyph import AgentText
 from glyph import GlyphWorkflow
 from glyph import step
 
