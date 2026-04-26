@@ -264,20 +264,23 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-Workflow notes:
+#### Python workflows (`@step`)
 
-- `@step` marks a normal Python step.
-- `@step(prompt=..., model=...)` marks an LLM step; `model` can override the default model for that step.
-- In LLM steps, use `yield` to execute the query, then optionally process `AgentQueryCompleted` after the yield.
-- Use `self.fill_prompt(...)` to render prompt templates safely while preserving missing placeholders.
-- Use `self.next_step(self.some_step, value)` to jump to another step and provide that step's input explicitly.
-- `GlyphWorkflow.run(options=..., initial_input=..., session_id=...)` supports runtime overrides and first-step input injection.
-- `GlyphWorkflow.from_markdown(path)` and `run_markdown_workflow(path, ...)` load the same linear workflow model from a Markdown file with `## Step:` sections.
-- In Markdown workflows, the first declared `## Step:` section is the entrypoint.
-- A Markdown step can be an LLM prompt, an inline Python block, or an `execute:` mapping that points to a file and optional function.
-- Markdown comments like `<!-- ... -->` are ignored by the workflow loader.
-- Install the package and run Markdown workflows directly with `glyph path/to/workflow.md`.
-- The Markdown CLI is the fastest way to package and demo a workflow because the workflow file itself becomes the executable interface.
+- `@step` — plain Python step.
+- `@step(prompt=..., model=..., is_streaming=...)` — LLM step; `model` overrides the workflow default for that step only.
+- LLM steps: set up `self.prompt` in the method body (`fill_prompt`, etc.). If the method does not use `yield`, the query runs after it returns. If it uses `yield` (async generator), that starts the turn: with `is_streaming=False` you typically get `AgentQueryCompleted` after the first `yield`; with `is_streaming=True` each `yield` receives the next streamed `AgentEvent` until `AgentQueryCompleted` (see `examples/16_workflow_streaming.py`).
+- `self.fill_prompt(...)` — render prompt templates without failing on missing placeholders (they stay in the text).
+- `self.next_step(self.some_step, value)` — jump to another step with an explicit input.
+- `self.stop_workflow(value)` — end the workflow immediately; `GlyphWorkflow.run(...)` returns `value`.
+- `GlyphWorkflow.run(options=..., initial_input=..., session_id=...)` — runtime overrides and optional first-step input.
+
+#### Markdown workflows (`## Step:`)
+
+- `GlyphWorkflow.from_markdown(path)` and `run_markdown_workflow(path, ...)` load a linear workflow from `## Step:` sections.
+- The first `## Step:` is the entrypoint.
+- Each step can be an LLM prompt, an inline Python block, or an `execute:` mapping (file plus optional function).
+- `<!-- ... -->` comments are ignored by the loader.
+
 
 ## Examples
 
