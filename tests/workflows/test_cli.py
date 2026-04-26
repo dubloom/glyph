@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 import glyph.cli
+from glyph import AgentQueryCompleted
 
 
 @pytest.mark.asyncio
@@ -30,3 +31,12 @@ def test_render_result_handles_scalars_and_none() -> None:
     assert glyph.cli._render_result("hello") == "hello"
     assert glyph.cli._render_result(42) == "42"
     assert glyph.cli._render_result(None) is None
+
+
+def test_render_result_returns_message_for_agent_query_completed() -> None:
+    completed = AgentQueryCompleted(message="done", usage={"input_tokens": 1})
+    assert glyph.cli._render_result(completed) == "done"
+
+
+def test_render_result_agent_query_completed_without_message_is_none() -> None:
+    assert glyph.cli._render_result(AgentQueryCompleted(message=None)) is None

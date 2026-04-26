@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from typing import Sequence
 
+from glyph.messages import AgentQueryCompleted
 from glyph.workflow import run_markdown_workflow
 
 
@@ -22,6 +23,8 @@ def build_parser() -> argparse.ArgumentParser:
 def _render_result(result: Any) -> str | None:
     if result is None:
         return None
+    if isinstance(result, AgentQueryCompleted):
+        return result.message
     if isinstance(result, (str, int, float, bool)):
         return str(result)
     return json.dumps(result)
