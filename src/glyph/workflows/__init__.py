@@ -343,8 +343,8 @@ class GlyphWorkflow:
 __all__ = [
     "GlyphWorkflow",
     "fill_prompt",
+    "load_markdown_workflow",
     "step",
     "StepDescriptor",
-    "load_markdown_workflow",
     "run_markdown_workflow",
 ]

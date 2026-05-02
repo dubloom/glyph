@@ -25,7 +25,8 @@ license = "Apache-2.0"
 license-files = ["LICEN[CS]E*"]
 dependencies = [
     "claude-agent-sdk",
-    "openai-agents"
+    "openai-agents",
+    "pyyaml",
 ]
 
 [project.optional-dependencies]

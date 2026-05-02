@@ -4,9 +4,12 @@ import pytest
 
 from glyph import AgentQueryCompleted
 import glyph.workflows as workflows_module
-from glyph.workflows.markdown import _load_execute_handler
 from glyph.workflows.markdown import load_markdown_workflow
 from glyph.workflows.markdown import parse_markdown_workflow
+from glyph.workflows.markdown.models import MarkdownExecuteFunctionStep
+from glyph.workflows.markdown.models import MarkdownExecuteInlineStep
+from glyph.workflows.markdown.models import MarkdownLLMStep
+from glyph.workflows.markdown.models import MarkdownStepKind
 
 
 def test_parse_markdown_workflow_accepts_mapping_returns(tmp_path: Path) -> None:
@@ -30,14 +33,12 @@ returns:
 
     definition = parse_markdown_workflow(workflow_path)
 
-    assert definition.entrypoint == "loadTripContext"
+    assert definition.steps[0].step_name == "loadTripContext"
     assert len(definition.steps) == 1
-    assert definition.steps[0].returns == {
-        "city": "str",
-        "mood": "str",
-        "memory": "str",
-    }
-    assert definition.steps[0].execute == "handlers.py:load_trip_context"
+    step0 = definition.steps[0]
+    assert isinstance(step0, MarkdownExecuteFunctionStep)
+    assert step0.file == "handlers.py"
+    assert step0.function == "load_trip_context"
 
 
 def test_parse_markdown_workflow_execute_file_defaults_to_main(tmp_path: Path) -> None:
@@ -59,43 +60,10 @@ returns:
     definition = parse_markdown_workflow(workflow_path)
 
     assert len(definition.steps) == 1
-    assert definition.steps[0].execute == "handlers.py"
-
-
-def test_parse_markdown_workflow_rejects_string_execute(tmp_path: Path) -> None:
-    workflow_path = tmp_path / "workflow.md"
-    workflow_path.write_text(
-        """---
-name: bad
----
-
-## Step: one
-execute: handlers.py:main
-""",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ValueError, match="mapping with `file:`"):
-        parse_markdown_workflow(workflow_path)
-
-
-def test_parse_markdown_workflow_rejects_unknown_execute_keys(tmp_path: Path) -> None:
-    workflow_path = tmp_path / "workflow.md"
-    workflow_path.write_text(
-        """---
-name: bad
----
-
-## Step: one
-execute:
-  file: handlers.py
-  module: foo
-""",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ValueError, match="unknown key"):
-        parse_markdown_workflow(workflow_path)
+    step0 = definition.steps[0]
+    assert isinstance(step0, MarkdownExecuteFunctionStep)
+    assert step0.file == "handlers.py"
+    assert step0.function == "main"
 
 
 def test_parse_markdown_workflow_allows_blank_line_between_step_metadata_keys(tmp_path: Path) -> None:
@@ -121,22 +89,7 @@ returns:
     definition = parse_markdown_workflow(workflow_path)
 
     assert len(definition.steps) == 1
-    assert definition.steps[0].kind == "execute"
-    assert definition.steps[0].returns == {"file_path": "str"}
-
-
-def test_load_execute_handler_defaults_to_main(tmp_path: Path) -> None:
-    script_path = tmp_path / "handlers.py"
-    script_path.write_text(
-        """async def main(step_input=None):
-    return {"ok": True}
-""",
-        encoding="utf-8",
-    )
-
-    handler = _load_execute_handler("handlers.py", tmp_path)
-
-    assert handler.__name__ == "main"
+    assert definition.steps[0].kind is MarkdownStepKind.EXECUTE
 
 
 def test_parse_markdown_workflow_treats_key_value_prompt_lines_as_prompt(tmp_path: Path) -> None:
@@ -157,7 +110,10 @@ Keep it to 3 sentences maximum.
     definition = parse_markdown_workflow(workflow_path)
 
     assert len(definition.steps) == 1
-    assert definition.steps[0].prompt == (
+    step0 = definition.steps[0]
+    assert isinstance(step0, MarkdownLLMStep)
+    assert step0.kind is MarkdownStepKind.LLM
+    assert step0.prompt == (
         "Subject: Lisbon postcard\n"
         "Tone: warm\n"
         "Keep it to 3 sentences maximum."
@@ -184,7 +140,7 @@ Write a warm postcard from Lisbon in 3 sentences max.
 
     definition = parse_markdown_workflow(workflow_path)
 
-    assert definition.entrypoint == "loadTripContext"
+    assert definition.steps[0].step_name == "loadTripContext"
 
 
 def test_parse_markdown_workflow_accepts_inline_python_without_execute_key(tmp_path: Path) -> None:
@@ -213,13 +169,11 @@ returns:
     definition = parse_markdown_workflow(workflow_path)
 
     assert len(definition.steps) == 1
-    assert definition.steps[0].kind == "execute"
-    assert definition.steps[0].execute_is_inline is True
-    assert definition.steps[0].execute == 'return {\n  "city": "Lisbon",\n  "mood": "warm and nostalgic",\n}'
-    assert definition.steps[0].returns == {
-        "city": "str",
-        "mood": "str",
-    }
+    step0 = definition.steps[0]
+    assert isinstance(step0, MarkdownExecuteInlineStep)
+    assert step0.kind is MarkdownStepKind.EXECUTE
+    assert step0.language == "python"
+    assert step0.source == 'return {\n  "city": "Lisbon",\n  "mood": "warm and nostalgic",\n}\n'
 
 
 def test_parse_markdown_workflow_accepts_inline_bash_without_execute_key(tmp_path: Path) -> None:
@@ -246,15 +200,35 @@ returns:
     definition = parse_markdown_workflow(workflow_path)
 
     assert len(definition.steps) == 1
-    assert definition.steps[0].kind == "execute"
-    assert definition.steps[0].execute_is_inline is True
-    assert definition.steps[0].execute_language == "bash"
-    assert definition.steps[0].execute == "printf 'hello from bash'"
-    assert definition.steps[0].returns == {
-        "stdout": "str",
-        "stderr": "str",
-        "exit_code": "int",
-    }
+    step0 = definition.steps[0]
+    assert isinstance(step0, MarkdownExecuteInlineStep)
+    assert step0.kind is MarkdownStepKind.EXECUTE
+    assert step0.language == "bash"
+    assert step0.source == "printf 'hello from bash'\n"
+
+
+def test_parse_markdown_workflow_treats_prompt_with_fenced_code_as_prompt(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "workflow.md"
+    workflow_path.write_text(
+        """---
+name: explainCode
+---
+
+## Step: explainCode
+Explain this code:
+```python
+print("hello")
+```
+""",
+        encoding="utf-8",
+    )
+
+    definition = parse_markdown_workflow(workflow_path)
+
+    assert len(definition.steps) == 1
+    step0 = definition.steps[0]
+    assert isinstance(step0, MarkdownLLMStep)
+    assert step0.prompt == 'Explain this code:\n```python\nprint("hello")\n```'
 
 
 @pytest.mark.asyncio
